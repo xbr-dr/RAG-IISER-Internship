@@ -1,0 +1,115 @@
+import os
+from sentence_transformers import SentenceTransformer
+import faiss
+import PyPDF2
+from together import Together
+
+import nltk
+
+nltk.download('punkt')
+from nltk.tokenize import sent_tokenize
+
+# Initialize Together client
+client = Together(api_key="Your_API_Key")
+
+# Sentence encoding model for generating embeddings
+sentence_encoder = SentenceTransformer('all-mpnet-base-v2')
+
+
+def preprocess_text(text):
+    """Preprocesses text for search (lowercase, tokenize)"""
+    return text.lower()
+
+
+def preprocess_pdf(pdf_path):
+    """Extracts and returns all text from the PDF"""
+    with open(pdf_path, 'rb') as pdf_file:
+        pdf_reader = PyPDF2.PdfReader(pdf_file)
+        text = ""
+        for page in pdf_reader.pages:
+            text += page.extract_text()
+    return text
+
+
+def split_text_into_sentences(text):
+    """Splits text into sentences"""
+    sentences = sent_tokenize(text)
+    return sentences
+
+
+def get_response(user_input, sentences, sentence_embeddings, index, history):
+    """Generates response with context from retrieved PDF sentences"""
+    if sentences:
+        # Preprocess user query
+        processed_user_query = preprocess_text(user_input)
+        user_query_embedding = sentence_encoder.encode([processed_user_query])
+
+        # Search for similar sentences in PDF
+        distances, retrieved_ids = index.search(user_query_embedding, k=3)  # Retrieve top 3 sentences
+
+        # Check if any relevant context is found
+        if distances[0][0] < 1.0:  # A threshold to determine if the context is relevant
+            retrieved_sentences = [sentences[i] for i in retrieved_ids[0]]
+            context = " ".join(retrieved_sentences)
+            combined_input = context + " " + user_input
+        else:
+            combined_input = user_input
+    else:
+        combined_input = user_input
+
+    # Add conversation history to the input
+    history_text = " ".join(history)
+    combined_input = history_text + " " + combined_input
+
+    response = client.chat.completions.create(
+        model="meta-llama/Llama-3-70b-chat-hf",
+        messages=[{"role": "user", "content": combined_input}],
+        max_tokens=2560
+    )
+
+    return response.choices[0].message.content
+
+
+# Directory containing PDFs
+pdf_directory = "C:/Users/xbrdr/Desktop/RAG_Bot/data"  # Replace with your folder path using to store the pdfs
+
+all_sentences = []
+
+# Iterate through all PDF files in the directory
+for filename in os.listdir(pdf_directory):
+    if filename.endswith('.pdf'):
+        pdf_path = os.path.join(pdf_directory, filename)
+        pdf_text = preprocess_pdf(pdf_path)
+        sentences = split_text_into_sentences(pdf_text)
+        all_sentences.extend(sentences)
+
+if all_sentences:
+    # Create FAISS index if sentences are available
+    sentence_embeddings = sentence_encoder.encode(all_sentences)
+    index = faiss.IndexFlatL2(sentence_embeddings.shape[1])
+    index.add(sentence_embeddings)
+
+print("Knowledge base and search index initialized.")
+
+print("Welcome to the RAG chatbot! Type 'quit' to exit.")
+
+# Initialize conversation history
+conversation_history = []
+
+while True:
+    user_input = input("You: ")
+    if user_input.lower() == 'quit':
+        break
+
+    # Add user input to conversation history
+    conversation_history.append(f"You: {user_input}")
+
+    response = get_response(user_input, all_sentences, sentence_embeddings if all_sentences else None,
+                            index if all_sentences else None, conversation_history)
+
+    # Add bot response to conversation history
+    conversation_history.append(f"RAG Bot: {response}")
+
+    print("RAG Bot:", response)
+
+print("Chatbot conversation ended :)")
