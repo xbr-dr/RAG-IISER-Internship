@@ -71,7 +71,7 @@ def get_response(user_input, sentences, sentence_embeddings, index, history):
 
 
 # Directory containing PDFs
-pdf_directory = "C:/Users/xbrdr/Desktop/RAG_Bot/data"  # Replace with your folder path using to store the pdfs
+pdf_directory = "data"  # Replace with your folder path using to store the pdfs
 
 all_sentences = []
 
